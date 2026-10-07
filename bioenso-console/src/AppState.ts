@@ -43,18 +43,20 @@ export const getNetworkState = (scenario: NetworkScenario, liveBiology?: any): F
     
     const history = mockHistoryScores(dummyBti.score, expectedTrend);
     
-    // Inject live biology if available for DEMO_FARM_01
+    // Inject live biology from the vision server for FARM_01 only
     let currentBiology = state.currentBiology;
-    if (liveBiology && state.id === "DEMO_FARM_01") {
+    if (liveBiology && state.id === "FARM_01") {
       currentBiology = {
-        ...currentBiology,
-        activityLevel: liveBiology.movement_index,
-        shadeSeeking: liveBiology.shade_occupancy_pct / 100,
-        waterDemand: liveBiology.water_zone_occupancy_pct / 100,
-        stressIndicators: [
-          ...currentBiology.stressIndicators,
-          `CV_CONFIDENCE:${(liveBiology.confidence * 100).toFixed(0)}%`
-        ]
+        // Keep animalsDetected from live vision count
+        animalsDetected: liveBiology.animals_observed ?? currentBiology.animalsDetected,
+        behavior: {
+          // Preserve simulation values for fields the camera doesn't measure
+          ...currentBiology.behavior,
+          // Override with live vision measurements
+          movement:     liveBiology.movement_index,
+          shadeSeeking: liveBiology.shade_occupancy_pct / 100,
+          waterDemand:  liveBiology.water_zone_occupancy_pct / 100,
+        },
       };
     }
     

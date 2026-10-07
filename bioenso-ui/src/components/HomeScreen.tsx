@@ -1,13 +1,42 @@
 import { useState } from 'react';
-import { Wind, Droplets, Thermometer, CheckCircle2, ChevronRight, CloudRain, Clock } from 'lucide-react';
+import { Wind, Droplets, Thermometer, CheckCircle2, ChevronRight, CloudRain, Clock, Activity, Eye } from 'lucide-react';
 import clsx from 'clsx';
 import type { AppState } from '../AppState';
 
-export default function HomeScreen({ appState, activeAction, setActiveAction }: { appState: AppState, activeAction: boolean, setActiveAction: any }) {
+interface VisionData {
+  status: string;
+  biology: {
+    animals_observed: number;
+    movement_index: number;
+    shade_occupancy_pct: number;
+    water_zone_occupancy_pct: number;
+    grazing_pct: number;
+    resting_pct: number;
+  };
+  vision: {
+    confidence: number;
+    source: string;
+  };
+}
+
+export default function HomeScreen({
+  appState,
+  activeAction,
+  setActiveAction,
+  visionData
+}: {
+  appState: AppState;
+  activeAction: boolean;
+  setActiveAction: (v: boolean) => void;
+  visionData: VisionData | null;
+}) {
   const [showWhy, setShowWhy] = useState(false);
   const { scenario, environment, animalState, riskState } = appState;
   const isOffline = scenario === "OFFLINE";
   const isRecovery = scenario === "RECOVERY";
+
+  // Whether we have live vision data from the camera system
+  const hasLiveVision = visionData !== null && visionData.status === "ONLINE";
 
   return (
     <div className="flex flex-col min-h-full pb-32 pt-14 px-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -29,7 +58,7 @@ export default function HomeScreen({ appState, activeAction, setActiveAction }: 
       <div className="mt-12">
         <h2 className={clsx(
           "text-[14px] font-black tracking-widest uppercase mb-2",
-          (riskState.level === "ACT NOW") ? "text-rose-400 drop-shadow-[0_0_8px_rgba(251,113,133,0.5)]" : 
+          (riskState.level === "ACT NOW") ? "text-rose-400 drop-shadow-[0_0_8px_rgba(251,113,133,0.5)]" :
           (isRecovery) ? "text-emerald-400" : "text-white/60"
         )}>
           {riskState.level === "ACT NOW" ? (
@@ -45,6 +74,38 @@ export default function HomeScreen({ appState, activeAction, setActiveAction }: 
         </p>
       </div>
 
+      {/* Live Vision Data Card — shown when camera is online */}
+      {hasLiveVision && visionData && (
+        <div className="mt-8 bg-emerald-500/10 border border-emerald-400/30 backdrop-blur-2xl rounded-[32px] p-5 shadow-xl">
+          <div className="flex items-center space-x-2 mb-4">
+            <Eye size={16} className="text-emerald-400" />
+            <span className="text-[10px] font-black tracking-widest uppercase text-emerald-300">Live Vision — Camera Active</span>
+            <span className="ml-auto text-[10px] font-bold text-emerald-300/60">
+              {(visionData.vision.confidence * 100).toFixed(0)}% conf.
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-black/20 rounded-2xl p-3 text-center">
+              <div className="text-2xl font-black text-white">{visionData.biology.animals_observed}</div>
+              <div className="text-[9px] font-black text-emerald-300/70 uppercase tracking-widest mt-0.5">Detected</div>
+            </div>
+            <div className="bg-black/20 rounded-2xl p-3 text-center">
+              <div className="text-2xl font-black text-white">{visionData.biology.shade_occupancy_pct}%</div>
+              <div className="text-[9px] font-black text-emerald-300/70 uppercase tracking-widest mt-0.5">Shade</div>
+            </div>
+            <div className="bg-black/20 rounded-2xl p-3 text-center">
+              <div className={clsx(
+                "text-2xl font-black",
+                visionData.biology.movement_index > 0.5 ? "text-orange-300" : "text-white"
+              )}>
+                {(visionData.biology.movement_index * 100).toFixed(0)}%
+              </div>
+              <div className="text-[9px] font-black text-emerald-300/70 uppercase tracking-widest mt-0.5">Activity</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Recovery Chart & Effectiveness */}
       {isRecovery && (
         <div className="mt-8 bg-emerald-500/20 border border-emerald-400/30 backdrop-blur-2xl rounded-[32px] p-6 shadow-2xl">
@@ -57,7 +118,7 @@ export default function HomeScreen({ appState, activeAction, setActiveAction }: 
                 </div>
                 <CheckCircle2 size={24} className="text-emerald-300 shrink-0" />
               </div>
-              
+
               <div className="space-y-4 font-bold text-white text-sm mb-2">
                 <div className="flex justify-between items-center border-b border-emerald-500/20 pb-2"><span className="text-white/50">Cooling activated</span><span>14:32</span></div>
                 <div className="flex justify-between items-center border-b border-emerald-500/20 pb-2"><span className="text-white/50">Risk before</span><span className="text-rose-400 line-through">86</span></div>
@@ -74,7 +135,7 @@ export default function HomeScreen({ appState, activeAction, setActiveAction }: 
                 </div>
                 <Wind size={24} className="text-emerald-300 shrink-0 animate-spin" style={{ animationDuration: '3s' }} />
               </div>
-              
+
               <div className="mt-6 flex items-end h-24 space-x-2">
                 <div className="w-1/4 bg-white/20 rounded-t-lg h-[86%]" />
                 <div className="w-1/4 bg-emerald-400/30 rounded-t-lg h-[69%]" />
@@ -112,25 +173,29 @@ export default function HomeScreen({ appState, activeAction, setActiveAction }: 
       {/* Why? Button & Explanation */}
       {(scenario === "HEAT_RISK" || scenario === "CRITICAL_HEAT" || scenario === "FLOOD_RISK") && !activeAction && (
         <div className="mt-8">
-          <button 
+          <button
             onClick={() => setShowWhy(!showWhy)}
             className="w-full flex items-center justify-between bg-black/20 backdrop-blur-md border border-white/10 rounded-full px-6 py-4 shadow-lg active:scale-95 transition-all"
           >
             <span className="font-black text-[11px] tracking-[0.2em] text-white/70 uppercase">Why is BioENSO alerting you?</span>
             <ChevronRight className={clsx("text-white/50 transition-transform", showWhy && "rotate-90")} size={20} />
           </button>
-          
+
           {showWhy && (
             <div className="mt-4 bg-white/10 backdrop-blur-2xl border border-white/20 rounded-[32px] p-6 shadow-2xl animate-in fade-in slide-in-from-top-4">
               <div className="space-y-6">
-                
+
                 <div>
                   <h4 className="text-[10px] font-black text-white/50 uppercase tracking-widest mb-3">Environment</h4>
                   <div className="flex items-start space-x-4 mb-3">
                     <Thermometer className="text-rose-400 mt-0.5" size={20} />
                     <div>
                       <div className="font-bold text-white">Temperature {environment.temperature}°C</div>
-                      <div className="text-xs font-bold text-white/70 mt-1">↑ Above your farm baseline (+{environment.tempDiff}°C)</div>
+                      <div className="text-xs font-bold text-white/70 mt-1">
+                        {environment.tempDiff > 0
+                          ? `↑ Above your farm baseline (+${environment.tempDiff}°C)`
+                          : `↓ Below your farm baseline (${environment.tempDiff}°C)`}
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-start space-x-4">
@@ -147,11 +212,15 @@ export default function HomeScreen({ appState, activeAction, setActiveAction }: 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <div className="text-xs font-bold text-white/70">Shade seeking</div>
-                      <div className="font-bold text-rose-300">↑ {animalState.shadeOccupancyDiff}%</div>
+                      <div className="font-bold text-rose-300">
+                        {animalState.shadeOccupancyDiff >= 0 ? '↑' : '↓'} {Math.abs(animalState.shadeOccupancyDiff)}%
+                      </div>
                     </div>
                     <div>
                       <div className="text-xs font-bold text-white/70">Water visits</div>
-                      <div className="font-bold text-rose-300">↑ {animalState.waterDemandDiff}%</div>
+                      <div className="font-bold text-rose-300">
+                        {animalState.waterDemandDiff >= 0 ? '↑' : '↓'} {Math.abs(animalState.waterDemandDiff)}%
+                      </div>
                     </div>
                     <div>
                       <div className="text-xs font-bold text-white/70">Movement</div>
@@ -168,7 +237,7 @@ export default function HomeScreen({ appState, activeAction, setActiveAction }: 
                   </div>
                 </div>
               </div>
-              
+
               <div className="mt-6 pt-4 border-t border-white/10">
                 <h4 className="text-[10px] font-black text-white/50 uppercase tracking-widest mb-2">BioENSO Conclusion</h4>
                 <p className="text-sm font-bold text-white">
@@ -220,7 +289,7 @@ export default function HomeScreen({ appState, activeAction, setActiveAction }: 
                 </>
               )}
             </ul>
-            
+
             {!activeAction && (
               <button
                 onClick={() => setActiveAction(true)}
@@ -237,10 +306,10 @@ export default function HomeScreen({ appState, activeAction, setActiveAction }: 
             {activeAction && (
               <div className="bg-emerald-500/20 border border-emerald-500/30 rounded-2xl p-6 animate-in fade-in zoom-in duration-300">
                 <div className="flex items-center space-x-3 mb-6 text-emerald-400">
-                  <Wind size={20} className="animate-spin" style={{ animationDuration: '2s' }} />
+                  <Activity size={20} className="animate-pulse" />
                   <span className="font-black uppercase tracking-widest text-sm">Action Active</span>
                 </div>
-                
+
                 {scenario === "FLOOD_RISK" ? (
                   <div className="space-y-3 font-bold text-white text-sm">
                     <div className="flex justify-between items-center"><span className="text-white/50">Animals Relocated</span><span className="text-emerald-400">27 / 30</span></div>
@@ -262,8 +331,8 @@ export default function HomeScreen({ appState, activeAction, setActiveAction }: 
       )}
 
       {/* Sensor Data Pills */}
-      <div className="px-6 mt-10">
-        <h2 className="text-[11px] font-black text-white/50 mb-4 tracking-[0.2em] uppercase">Simulated Environment</h2>
+      <div className="px-0 mt-10">
+        <h2 className="text-[11px] font-black text-white/50 mb-4 tracking-[0.2em] uppercase">Environment</h2>
         <div className="flex space-x-4 overflow-x-auto pb-4 hide-scrollbar">
           <div className="bg-white/10 backdrop-blur-xl rounded-[24px] p-5 min-w-[140px] border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.15)] flex flex-col justify-between">
             <Thermometer size={24} className="text-white/60 mb-6" />
@@ -272,7 +341,7 @@ export default function HomeScreen({ appState, activeAction, setActiveAction }: 
               <div className="text-xs font-bold text-white/50 tracking-wide mt-1">TEMP</div>
             </div>
           </div>
-          
+
           <div className="bg-white/10 backdrop-blur-xl rounded-[24px] p-5 min-w-[140px] border border-white/10 shadow-[0_8px_24px_rgba(0,0,0,0.15)] flex flex-col justify-between">
             <Wind size={24} className="text-white/60 mb-6" />
             <div>
