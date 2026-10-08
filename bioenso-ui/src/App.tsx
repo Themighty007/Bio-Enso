@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Camera, Home, List, Bell, Settings, Wifi, WifiOff } from 'lucide-react'
+import { Camera, Home, List, Bell, Settings, Wifi, WifiOff, Cpu } from 'lucide-react'
 import clsx from 'clsx'
 
 import HomeScreen from './components/HomeScreen'
@@ -28,6 +28,17 @@ interface VisionData {
     confidence: number;
     source: string;
   };
+  hardware?: HardwareData;
+}
+
+export interface HardwareData {
+  temperature: number;
+  humidity: number;
+  water_level: number;
+  fan_active: boolean;
+  water_alert: boolean;
+  heat_alert: boolean;
+  connected: boolean;
 }
 
 export default function App() {
@@ -36,9 +47,10 @@ export default function App() {
   const [activeAction, setActiveAction] = useState(false);
   const [recoveryRisk, setRecoveryRisk] = useState<number | null>(null);
   const [visionData, setVisionData] = useState<VisionData | null>(null);
+  const [hardwareData, setHardwareData] = useState<HardwareData | null>(null);
   const [visionOnline, setVisionOnline] = useState<boolean | null>(null);
 
-  // Poll the vision API for live data
+  // Poll the vision & hardware API for live data
   useEffect(() => {
     const poll = async () => {
       try {
@@ -49,6 +61,17 @@ export default function App() {
           const data: VisionData = await res.json();
           setVisionData(data);
           setVisionOnline(data.status === "ONLINE");
+
+          if (data.hardware && data.hardware.connected) {
+            setHardwareData(data.hardware);
+
+            // Hardware-driven automated alert transitions
+            if (data.hardware.water_alert) {
+              setScenario("FLOOD_RISK");
+            } else if (data.hardware.heat_alert) {
+              setScenario("CRITICAL_HEAT");
+            }
+          }
         } else {
           setVisionOnline(false);
         }
@@ -59,9 +82,20 @@ export default function App() {
     };
 
     poll(); // immediate first call
-    const interval = setInterval(poll, 2000);
+    const interval = setInterval(poll, 1500);
     return () => clearInterval(interval);
   }, []);
+
+  // When farmer taps "START COOLING" or Action in UI -> Send actuation signal to ESP32 Fan!
+  useEffect(() => {
+    if (activeAction) {
+      fetch('http://localhost:8000/api/v1/hardware/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fan: true })
+      }).catch(() => {});
+    }
+  }, [activeAction]);
 
   // Recovery transition logic
   useEffect(() => {
@@ -78,7 +112,6 @@ export default function App() {
     if (scenario === "RECOVERY" && recoveryRisk !== null) {
       if (recoveryRisk > 32) {
         const timer = setTimeout(() => {
-          // Drop risk down progressively: 86 → 78 → 69 → 57 → 44 → 32
           let nextRisk = recoveryRisk;
           if (recoveryRisk === 86) nextRisk = 78;
           else if (recoveryRisk === 78) nextRisk = 69;
@@ -96,9 +129,24 @@ export default function App() {
   const handleSetScenario = useCallback((s: ScenarioType) => {
     setScenario(s);
     setRecoveryRisk(null);
+    if (s === "NORMAL") {
+      // Turn off fan override when reset to normal
+      fetch('http://localhost:8000/api/v1/hardware/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fan: null })
+      }).catch(() => {});
+    }
   }, []);
 
   const appState = getScenarioState(scenario, recoveryRisk ?? undefined);
+
+  // If live hardware is connected, reflect live temperature
+  if (hardwareData && hardwareData.connected) {
+    appState.environment.temperature = hardwareData.temperature;
+    appState.environment.humidity = hardwareData.humidity;
+    appState.environment.tempDiff = Number((hardwareData.temperature - 32.1).toFixed(1));
+  }
 
   const getThemeClasses = () => {
     if (appState.riskState.level === "ACT NOW" && scenario === "CRITICAL_HEAT") return "from-rose-500 to-red-900";
@@ -112,7 +160,6 @@ export default function App() {
     return "from-emerald-400 to-teal-900";
   };
 
-  // Badge: show alert dot for any risky scenario (but not recovery/offline/normal)
   const showAlertBadge = ["HEAT_RISK", "CRITICAL_HEAT", "FLOOD_RISK"].includes(scenario);
 
   return (
@@ -126,27 +173,55 @@ export default function App() {
           style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'noiseFilter\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.65\' numOctaves=\'3\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23noiseFilter)\'/%3E%3C/svg%3E")' }}
         />
 
-        {/* Vision API status indicator - top right micro badge */}
-        {visionOnline !== null && (
-          <div className="absolute top-4 right-4 z-50 flex items-center space-x-1.5 bg-black/40 backdrop-blur-md px-2 py-1 rounded-full border border-white/10">
-            {visionOnline ? (
-              <Wifi size={10} className="text-emerald-400" />
-            ) : (
-              <WifiOff size={10} className="text-white/30" />
-            )}
-            <span className="text-[9px] font-black tracking-widest uppercase text-white/50">
-              {visionOnline ? "VISION LIVE" : "VISION OFFLINE"}
-            </span>
-          </div>
-        )}
+        {/* Status Indicators at Top Right */}
+        <div className="absolute top-4 right-4 z-50 flex items-center space-x-2">
+          {/* Hardware ESP32 Badge */}
+          {hardwareData?.connected && (
+            <div className="flex items-center space-x-1 bg-black/50 backdrop-blur-md px-2 py-1 rounded-full border border-emerald-400/40">
+              <Cpu size={10} className="text-emerald-400 animate-pulse" />
+              <span className="text-[9px] font-black tracking-widest uppercase text-emerald-300">
+                ESP32 {hardwareData.fan_active ? 'FAN ON' : 'LINKED'}
+              </span>
+            </div>
+          )}
+
+          {/* Vision API status indicator */}
+          {visionOnline !== null && (
+            <div className="flex items-center space-x-1.5 bg-black/40 backdrop-blur-md px-2 py-1 rounded-full border border-white/10">
+              {visionOnline ? (
+                <Wifi size={10} className="text-emerald-400" />
+              ) : (
+                <WifiOff size={10} className="text-white/30" />
+              )}
+              <span className="text-[9px] font-black tracking-widest uppercase text-white/50">
+                {visionOnline ? "VISION LIVE" : "VISION OFFLINE"}
+              </span>
+            </div>
+          )}
+        </div>
 
         {/* Main Content Area */}
         <div className="relative z-10 flex-1 overflow-y-auto hide-scrollbar">
-          {activeTab === "home" && <HomeScreen appState={appState} activeAction={activeAction} setActiveAction={setActiveAction} visionData={visionData} />}
+          {activeTab === "home" && (
+            <HomeScreen
+              appState={appState}
+              activeAction={activeAction}
+              setActiveAction={setActiveAction}
+              visionData={visionData}
+              hardwareData={hardwareData}
+            />
+          )}
           {activeTab === "live" && <LiveScreen appState={appState} visionData={visionData} />}
           {activeTab === "animals" && <AnimalsScreen appState={appState} />}
           {activeTab === "alerts" && <AlertsScreen appState={appState} />}
-          {activeTab === "farm" && <FarmScreen appState={appState} setScenario={handleSetScenario} setActiveAction={setActiveAction} visionOnline={visionOnline} />}
+          {activeTab === "farm" && (
+            <FarmScreen
+              appState={appState}
+              setScenario={handleSetScenario}
+              setActiveAction={setActiveAction}
+              visionOnline={visionOnline}
+            />
+          )}
         </div>
 
         {/* Bottom Navigation */}

@@ -1,4 +1,4 @@
-import { Info, Cpu, HardHat, Wifi, ShieldCheck, WifiOff, Thermometer, Droplets, Camera, Wind, Server, CheckCircle } from 'lucide-react';
+import { Info, HardHat, Wifi, ShieldCheck, WifiOff, Thermometer, Camera, Wind, Server, CheckCircle } from 'lucide-react';
 import clsx from 'clsx';
 import type { AppState, ScenarioType } from '../AppState';
 

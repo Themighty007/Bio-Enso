@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Wind, Droplets, Thermometer, CheckCircle2, ChevronRight, CloudRain, Clock, Activity, Eye } from 'lucide-react';
+import { Wind, Droplets, Thermometer, CheckCircle2, ChevronRight, CloudRain, Clock, Activity, Eye, Cpu, Zap } from 'lucide-react';
 import clsx from 'clsx';
 import type { AppState } from '../AppState';
+import type { HardwareData } from '../App';
 
 interface VisionData {
   status: string;
@@ -23,12 +24,14 @@ export default function HomeScreen({
   appState,
   activeAction,
   setActiveAction,
-  visionData
+  visionData,
+  hardwareData
 }: {
   appState: AppState;
   activeAction: boolean;
   setActiveAction: (v: boolean) => void;
   visionData: VisionData | null;
+  hardwareData?: HardwareData | null;
 }) {
   const [showWhy, setShowWhy] = useState(false);
   const { scenario, environment, animalState, riskState } = appState;
@@ -37,6 +40,7 @@ export default function HomeScreen({
 
   // Whether we have live vision data from the camera system
   const hasLiveVision = visionData !== null && visionData.status === "ONLINE";
+  const hasHardware = hardwareData !== null && hardwareData?.connected;
 
   return (
     <div className="flex flex-col min-h-full pb-32 pt-14 px-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -74,9 +78,51 @@ export default function HomeScreen({
         </p>
       </div>
 
+      {/* Live ESP32 Hardware Card — shown when breadboard node is sending data */}
+      {hasHardware && hardwareData && (
+        <div className={clsx(
+          "mt-6 backdrop-blur-2xl rounded-[32px] p-5 shadow-xl border transition-all duration-500",
+          hardwareData.heat_alert ? "bg-rose-500/20 border-rose-500/40" :
+          hardwareData.water_alert ? "bg-blue-500/20 border-blue-500/40" :
+          "bg-white/10 border-white/10"
+        )}>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-2">
+              <Cpu size={16} className="text-emerald-400" />
+              <span className="text-[10px] font-black tracking-widest uppercase text-white/90">ESP32 IoT Node &mdash; Real-Time</span>
+            </div>
+            <div className={clsx(
+              "flex items-center space-x-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider",
+              hardwareData.fan_active ? "bg-emerald-500 text-white animate-pulse" : "bg-white/10 text-white/60"
+            )}>
+              <Wind size={10} className={hardwareData.fan_active ? "animate-spin" : ""} />
+              <span>{hardwareData.fan_active ? "Fan ON" : "Fan Idle"}</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-black/30 rounded-2xl p-3 text-center">
+              <div className={clsx("text-xl font-black", hardwareData.temperature > 35 ? "text-rose-400" : "text-white")}>
+                {hardwareData.temperature.toFixed(1)}°C
+              </div>
+              <div className="text-[9px] font-black text-white/50 uppercase tracking-widest mt-0.5">DHT22 Temp</div>
+            </div>
+            <div className="bg-black/30 rounded-2xl p-3 text-center">
+              <div className="text-xl font-black text-white">{hardwareData.humidity.toFixed(0)}%</div>
+              <div className="text-[9px] font-black text-white/50 uppercase tracking-widest mt-0.5">Humidity</div>
+            </div>
+            <div className="bg-black/30 rounded-2xl p-3 text-center">
+              <div className={clsx("text-xl font-black", hardwareData.water_level > 60 ? "text-blue-400" : "text-white")}>
+                {hardwareData.water_level}%
+              </div>
+              <div className="text-[9px] font-black text-white/50 uppercase tracking-widest mt-0.5">Water Level</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Live Vision Data Card — shown when camera is online */}
       {hasLiveVision && visionData && (
-        <div className="mt-8 bg-emerald-500/10 border border-emerald-400/30 backdrop-blur-2xl rounded-[32px] p-5 shadow-xl">
+        <div className="mt-6 bg-emerald-500/10 border border-emerald-400/30 backdrop-blur-2xl rounded-[32px] p-5 shadow-xl">
           <div className="flex items-center space-x-2 mb-4">
             <Eye size={16} className="text-emerald-400" />
             <span className="text-[10px] font-black tracking-widest uppercase text-emerald-300">Live Vision — Camera Active</span>
@@ -317,13 +363,20 @@ export default function HomeScreen({
                   </div>
                 ) : (
                   <div className="space-y-3 font-bold text-white text-sm">
-                    <div className="flex justify-between items-center"><span className="text-white/50">Fan 1</span><span className="text-emerald-400">ON</span></div>
-                    <div className="flex justify-between items-center"><span className="text-white/50">Fan 2</span><span className="text-emerald-400">ON</span></div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-white/50">Hardware Fan Relay</span>
+                      <span className="text-emerald-400 flex items-center space-x-1">
+                        <Zap size={14} className="animate-bounce" />
+                        <span>SPINNING (5V)</span>
+                      </span>
+                    </div>
                     <div className="flex justify-between items-center"><span className="text-white/50">Water point</span><span className="text-emerald-400">READY</span></div>
                     <div className="flex justify-between items-center"><span className="text-white/50">Herd zone</span><span className="text-emerald-400">B → A</span></div>
                   </div>
                 )}
-                <p className="text-[10px] font-black text-emerald-200/70 mt-6 border-t border-emerald-500/20 pt-4 uppercase tracking-widest">Initiating biological recovery...</p>
+                <p className="text-[10px] font-black text-emerald-200/70 mt-6 border-t border-emerald-500/20 pt-4 uppercase tracking-widest">
+                  Physical cooling activated &bull; Initiating biological recovery...
+                </p>
               </div>
             )}
           </div>
