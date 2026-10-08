@@ -1,20 +1,28 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Camera, Home, List, Bell, Settings, Wifi, WifiOff, Cpu } from 'lucide-react'
-import clsx from 'clsx'
+import { useState, useEffect, useCallback } from 'react';
+import clsx from 'clsx';
 
-import HomeScreen from './components/HomeScreen'
-import LiveScreen from './components/LiveScreen'
-import AnimalsScreen from './components/AnimalsScreen'
-import AlertsScreen from './components/AlertsScreen'
-import FarmScreen from './components/FarmScreen'
+import FloatingNav from './components/FloatingNav';
+import LandingHero from './components/LandingHero';
+import FourStepsSection from './components/FourStepsSection';
+import ComparisonSection from './components/ComparisonSection';
+import DesktopDashboardView from './components/DesktopDashboardView';
+import MobileSimulatorView from './components/MobileSimulatorView';
+import HardwareLabSection from './components/HardwareLabSection';
 
-import { getScenarioState } from './AppState'
-import type { ScenarioType } from './AppState'
+import { getScenarioState } from './AppState';
+import type { ScenarioType } from './AppState';
 
-type TabType = "home" | "live" | "animals" | "alerts" | "farm";
+export interface HardwareData {
+  temperature: number;
+  humidity: number;
+  water_level: number;
+  fan_active: boolean;
+  water_alert: boolean;
+  heat_alert: boolean;
+  connected: boolean;
+}
 
-// Vision API live data type
-interface VisionData {
+export interface VisionData {
   status: string;
   biology: {
     animals_observed: number;
@@ -31,26 +39,18 @@ interface VisionData {
   hardware?: HardwareData;
 }
 
-export interface HardwareData {
-  temperature: number;
-  humidity: number;
-  water_level: number;
-  fan_active: boolean;
-  water_alert: boolean;
-  heat_alert: boolean;
-  connected: boolean;
-}
-
 export default function App() {
+  const [deviceMode, setDeviceMode] = useState<'desktop' | 'mobile'>('desktop');
+  const [activeSection, setActiveSection] = useState<string>('hero');
   const [scenario, setScenario] = useState<ScenarioType>("NORMAL");
-  const [activeTab, setActiveTab] = useState<TabType>("home");
   const [activeAction, setActiveAction] = useState(false);
   const [recoveryRisk, setRecoveryRisk] = useState<number | null>(null);
+  
   const [visionData, setVisionData] = useState<VisionData | null>(null);
   const [hardwareData, setHardwareData] = useState<HardwareData | null>(null);
   const [visionOnline, setVisionOnline] = useState<boolean | null>(null);
 
-  // Poll the vision & hardware API for live data
+  // Poll the vision & hardware API for live data every 1.5s
   useEffect(() => {
     const poll = async () => {
       try {
@@ -62,14 +62,16 @@ export default function App() {
           setVisionData(data);
           setVisionOnline(data.status === "ONLINE");
 
-          if (data.hardware && data.hardware.connected) {
+          if (data.hardware) {
             setHardwareData(data.hardware);
 
-            // Hardware-driven automated alert transitions
-            if (data.hardware.water_alert) {
-              setScenario("FLOOD_RISK");
-            } else if (data.hardware.heat_alert) {
-              setScenario("CRITICAL_HEAT");
+            // Hardware-driven automated alert transitions if connected
+            if (data.hardware.connected) {
+              if (data.hardware.water_alert && scenario !== "FLOOD_RISK") {
+                setScenario("FLOOD_RISK");
+              } else if (data.hardware.heat_alert && scenario !== "CRITICAL_HEAT") {
+                setScenario("CRITICAL_HEAT");
+              }
             }
           }
         } else {
@@ -77,14 +79,13 @@ export default function App() {
         }
       } catch {
         setVisionOnline(false);
-        setVisionData(null);
       }
     };
 
-    poll(); // immediate first call
+    poll();
     const interval = setInterval(poll, 1500);
     return () => clearInterval(interval);
-  }, []);
+  }, [scenario]);
 
   // When farmer taps "START COOLING" or Action in UI -> Send actuation signal to ESP32 Fan!
   useEffect(() => {
@@ -139,6 +140,32 @@ export default function App() {
     }
   }, []);
 
+  const handleTriggerHardwareFan = useCallback((fanState: boolean | null) => {
+    fetch('http://localhost:8000/api/v1/hardware/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fan: fanState })
+    }).catch(() => {});
+
+    // Optimistically update local hardware state
+    setHardwareData(prev => prev ? ({ ...prev, fan_active: fanState ?? false }) : null);
+  }, []);
+
+  const handleSendTelemetry = useCallback((temp: number, hum: number, water: number) => {
+    fetch('http://localhost:8000/api/v1/hardware/telemetry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ temperature: temp, humidity: hum, water_level: water })
+    })
+      .then(r => r.json())
+      .then(resp => {
+        if (resp && resp.fan !== undefined) {
+          setHardwareData(prev => prev ? ({ ...prev, fan_active: resp.fan }) : null);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   const appState = getScenarioState(scenario, recoveryRisk ?? undefined);
 
   // If live hardware is connected, reflect live temperature
@@ -148,121 +175,177 @@ export default function App() {
     appState.environment.tempDiff = Number((hardwareData.temperature - 32.1).toFixed(1));
   }
 
-  const getThemeClasses = () => {
-    if (appState.riskState.level === "ACT NOW" && scenario === "CRITICAL_HEAT") return "from-rose-500 to-red-900";
-    if (appState.riskState.level === "ACT NOW" && scenario === "FLOOD_RISK") return "from-blue-600 to-slate-900";
-    if (appState.riskState.level === "WATCH") return "from-amber-400 to-orange-700";
-    if (scenario === "RECOVERY") {
-      if (appState.riskState.score < 40) return "from-emerald-400 to-teal-900";
-      return "from-emerald-600 to-blue-900";
+  // Scroll spy for dot navigation
+  useEffect(() => {
+    const sections = ['hero', 'steps', 'compare', 'dashboard', 'hardware-lab'];
+    const handleScroll = () => {
+      const scrollY = window.scrollY + 250;
+      for (const id of sections) {
+        const el = document.getElementById(id);
+        if (el) {
+          const top = el.offsetTop;
+          const height = el.offsetHeight;
+          if (scrollY >= top && scrollY < top + height) {
+            setActiveSection(id);
+            break;
+          }
+        }
+      }
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const scrollTo = (id: string) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
     }
-    if (scenario === "OFFLINE") return "from-slate-400 to-slate-800";
-    return "from-emerald-400 to-teal-900";
   };
 
-  const showAlertBadge = ["HEAT_RISK", "CRITICAL_HEAT", "FLOOD_RISK"].includes(scenario);
-
   return (
-    <div className="flex items-center justify-center min-h-screen bg-slate-900 p-0 sm:p-6">
-      <div className="w-full h-full sm:h-[850px] max-w-md flex flex-col overflow-hidden bg-black relative sm:rounded-[40px] sm:shadow-[0_0_0_12px_rgba(30,41,59,1),0_0_60px_rgba(0,0,0,0.5)] sm:border sm:border-slate-700">
+    <div className="min-h-screen bg-[#050505] text-[#f8fafc] font-sans relative selection:bg-lime-brand selection:text-black">
+      
+      {/* 1. Floating Pill Navigation Header (Aarunya Style) */}
+      <FloatingNav
+        deviceMode={deviceMode}
+        setDeviceMode={setDeviceMode}
+        activeSection={activeSection}
+        hardwareData={hardwareData}
+        visionOnline={visionOnline}
+        onLaunchApp={() => scrollTo('dashboard')}
+      />
 
-        {/* App Shell Background */}
-        <div className={clsx("absolute inset-0 bg-gradient-to-br transition-colors duration-1000 ease-in-out", getThemeClasses())} />
-        <div
-          className="absolute inset-0 opacity-20 mix-blend-overlay pointer-events-none"
-          style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'noiseFilter\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.65\' numOctaves=\'3\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23noiseFilter)\'/%3E%3C/svg%3E")' }}
-        />
+      {/* 2. Vertical Dot Navigation Indicator (Aarunya Style on right margin) */}
+      <div className="fixed right-6 top-1/2 -translate-y-1/2 z-40 hidden xl:flex flex-col space-y-3 pointer-events-auto bg-black/40 backdrop-blur-md p-2 rounded-full border border-white/10">
+        {[
+          { id: 'hero', title: 'Overview' },
+          { id: 'steps', title: '4 Steps' },
+          { id: 'compare', title: 'Comparison' },
+          { id: 'dashboard', title: 'Farmers App' },
+          { id: 'hardware-lab', title: 'Hardware Lab' }
+        ].map(dot => (
+          <button
+            key={dot.id}
+            onClick={() => scrollTo(dot.id)}
+            title={dot.title}
+            className={clsx(
+              "w-2.5 h-2.5 rounded-full transition-all duration-300 cursor-pointer",
+              activeSection === dot.id 
+                ? "bg-lime-brand scale-125 shadow-glow-lime" 
+                : "bg-white/30 hover:bg-white/60"
+            )}
+          />
+        ))}
+      </div>
 
-        {/* Status Indicators at Top Right */}
-        <div className="absolute top-4 right-4 z-50 flex items-center space-x-2">
-          {/* Hardware ESP32 Badge */}
-          {hardwareData?.connected && (
-            <div className="flex items-center space-x-1 bg-black/50 backdrop-blur-md px-2 py-1 rounded-full border border-emerald-400/40">
-              <Cpu size={10} className="text-emerald-400 animate-pulse" />
-              <span className="text-[9px] font-black tracking-widest uppercase text-emerald-300">
-                ESP32 {hardwareData.fan_active ? 'FAN ON' : 'LINKED'}
-              </span>
+      {/* 3. Hero Landing Section (Aarunya Net Zero Theme) */}
+      <LandingHero
+        hardwareData={hardwareData}
+        onLaunchApp={() => scrollTo('dashboard')}
+        onTestHardware={() => scrollTo('hardware-lab')}
+      />
+
+      {/* 4. Four Steps Pipeline Section (Aarunya Roof to Power Theme) */}
+      <FourStepsSection />
+
+      {/* 5. Comparison Section (Eduvia Brutalist Theme) */}
+      <ComparisonSection />
+
+      {/* 6. The Body of the Farmers App (Next Slide / Main Interactive Dashboard) */}
+      <section id="dashboard" className="py-24 bg-[#080808] border-t border-white/10 relative overflow-hidden">
+        
+        {/* Glow ambient background */}
+        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[800px] h-[500px] bg-lime-brand/5 blur-[220px] pointer-events-none" />
+
+        <div className="max-w-7xl mx-auto px-6 sm:px-12 relative z-10">
+          
+          {/* Section Header & Interactive Device Viewport Toggle */}
+          <div className="flex flex-col md:flex-row md:items-end justify-between pb-8 mb-10 border-b border-white/10 gap-6">
+            <div>
+              <div className="inline-flex items-center space-x-2 bg-white/5 border border-white/10 px-3.5 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest text-lime-brand mb-3">
+                <span>SLIDE 04 • LIVE SYSTEM APPLICATION</span>
+              </div>
+              <h2 className="text-4xl sm:text-6xl font-black tracking-tight text-white uppercase leading-none">
+                THE FARMERS APP <br />
+                <span className="text-lime-brand">COMMAND CENTER</span>
+              </h2>
             </div>
-          )}
 
-          {/* Vision API status indicator */}
-          {visionOnline !== null && (
-            <div className="flex items-center space-x-1.5 bg-black/40 backdrop-blur-md px-2 py-1 rounded-full border border-white/10">
-              {visionOnline ? (
-                <Wifi size={10} className="text-emerald-400" />
-              ) : (
-                <WifiOff size={10} className="text-white/30" />
-              )}
-              <span className="text-[9px] font-black tracking-widest uppercase text-white/50">
-                {visionOnline ? "VISION LIVE" : "VISION OFFLINE"}
-              </span>
+            {/* Mode Selector Pill */}
+            <div className="flex items-center space-x-3 bg-black/80 border-2 border-white/20 p-1.5 rounded-full shadow-2xl">
+              <button
+                onClick={() => setDeviceMode('desktop')}
+                className={clsx(
+                  "px-4 py-2 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer",
+                  deviceMode === 'desktop' 
+                    ? "bg-white text-black shadow-md" 
+                    : "text-white/60 hover:text-white"
+                )}
+              >
+                🖥️ Widescreen Desktop View
+              </button>
+              <button
+                onClick={() => setDeviceMode('mobile')}
+                className={clsx(
+                  "px-4 py-2 rounded-full text-xs font-black uppercase tracking-wider transition-all cursor-pointer",
+                  deviceMode === 'mobile' 
+                    ? "bg-lime-brand text-black font-black shadow-glow-lime" 
+                    : "text-white/60 hover:text-white"
+                )}
+              >
+                📱 Mobile Handheld View
+              </button>
             </div>
-          )}
-        </div>
+          </div>
 
-        {/* Main Content Area */}
-        <div className="relative z-10 flex-1 overflow-y-auto hide-scrollbar">
-          {activeTab === "home" && (
-            <HomeScreen
-              appState={appState}
-              activeAction={activeAction}
-              setActiveAction={setActiveAction}
-              visionData={visionData}
-              hardwareData={hardwareData}
-            />
-          )}
-          {activeTab === "live" && <LiveScreen appState={appState} visionData={visionData} />}
-          {activeTab === "animals" && <AnimalsScreen appState={appState} />}
-          {activeTab === "alerts" && <AlertsScreen appState={appState} />}
-          {activeTab === "farm" && (
-            <FarmScreen
+          {/* Conditional Rendering: Desktop View vs Mobile Smartphone View */}
+          {deviceMode === 'desktop' ? (
+            <DesktopDashboardView
               appState={appState}
               setScenario={handleSetScenario}
+              activeAction={activeAction}
               setActiveAction={setActiveAction}
+              hardwareData={hardwareData}
+              visionData={visionData}
+              onTriggerHardwareFan={handleTriggerHardwareFan}
+            />
+          ) : (
+            <MobileSimulatorView
+              appState={appState}
+              setScenario={handleSetScenario}
+              activeAction={activeAction}
+              setActiveAction={setActiveAction}
+              hardwareData={hardwareData}
+              visionData={visionData}
               visionOnline={visionOnline}
             />
           )}
-        </div>
 
-        {/* Bottom Navigation */}
-        <div className="absolute bottom-6 left-0 w-full px-6 z-50">
-          <nav className="w-full bg-black/40 backdrop-blur-2xl border border-white/20 shadow-[0_8px_32px_rgba(0,0,0,0.4)] rounded-full px-2 py-2">
-            <div className="flex justify-between items-center h-14">
-              {[
-                { id: "home", icon: Home },
-                { id: "live", icon: Camera },
-                { id: "animals", icon: List },
-                { id: "alerts", icon: Bell, badge: showAlertBadge },
-                { id: "farm", icon: Settings }
-              ].map((item) => {
-                const isActive = activeTab === item.id;
-                const Icon = item.icon;
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => setActiveTab(item.id as TabType)}
-                    className={clsx(
-                      "flex flex-col items-center justify-center w-14 h-14 rounded-full transition-all duration-300",
-                      isActive ? "bg-white/20 text-white shadow-inner" : "text-white/50 hover:text-white/80 hover:bg-white/5"
-                    )}
-                    aria-label={item.id}
-                  >
-                    <div className="relative">
-                      <Icon size={24} className={isActive ? "stroke-[2.5]" : "stroke-2"} />
-                      {item.badge && (
-                        <span className="absolute top-0 right-0 -mt-1 -mr-1 flex h-3 w-3">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 border-2 border-white"></span>
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </nav>
         </div>
-      </div>
+      </section>
+
+      {/* 7. Hardware & Actuator Interactive Bench */}
+      <HardwareLabSection
+        hardwareData={hardwareData}
+        onSendTelemetry={handleSendTelemetry}
+        onTriggerFan={handleTriggerHardwareFan}
+      />
+
+      {/* 8. Footer */}
+      <footer className="py-12 bg-black border-t border-white/10 text-white/50 text-xs">
+        <div className="max-w-7xl mx-auto px-6 sm:px-12 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center space-x-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-lime-brand shadow-glow-lime" />
+            <span className="font-black text-white text-sm tracking-widest uppercase">BIOENSO</span>
+            <span>&mdash; Autonomous Livestock Biometeorological Defense</span>
+          </div>
+          <div className="text-[11px] font-mono text-white/40">
+            ESP32 (DHT22 + Water + Fan) • YOLOv8 • Flask :8000 • Vite :5173
+          </div>
+        </div>
+      </footer>
+
     </div>
-  )
+  );
 }
