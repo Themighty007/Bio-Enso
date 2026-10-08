@@ -194,3 +194,7 @@ def update_observation(active_animals, movement_index, shade_pct, water_pct,
             "confidence": float(confidence),
             "status": status,
         })
+
+
+if __name__ == "__main__":
+    start_api_server()
