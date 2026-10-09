@@ -17,7 +17,7 @@ function App() {
   const [networkScenario, setNetworkScenario] = useState<NetworkScenario>("NETWORK_HEAT_EVENT");
   const [selectedFarmId, setSelectedFarmId] = useState<string | null>(null);
   const [activeFarmTab, setActiveFarmTab] = useState<FarmTab>("OVERVIEW");
-  const [liveBiology, setLiveBiology] = useState<any>(null);
+  const [liveTelemetry, setLiveTelemetry] = useState<any>(null);
   
   useEffect(() => {
     const interval = setInterval(async () => {
@@ -25,7 +25,7 @@ function App() {
         const res = await fetch('http://localhost:8000/api/v1/observations/biology');
         if (res.ok) {
           const data = await res.json();
-          setLiveBiology(data.biology);
+          setLiveTelemetry(data);
         }
       } catch (err) {
         // Ignore API errors gracefully when vision script is offline
@@ -34,7 +34,7 @@ function App() {
     return () => clearInterval(interval);
   }, []);
   
-  const farms = getNetworkState(networkScenario, liveBiology);
+  const farms = getNetworkState(networkScenario, liveTelemetry?.biology);
   const selectedFarm = selectedFarmId ? farms.find(f => f.id === selectedFarmId) : null;
 
   return (
@@ -135,7 +135,7 @@ function App() {
       <div className="flex-1 overflow-y-auto relative bg-[#050505] hide-scrollbar">
         {selectedFarmId === null ? (
           <div className="relative z-10 min-h-full p-10">
-            <ObservatoryHome farms={farms} onSelectFarm={setSelectedFarmId} />
+            <ObservatoryHome farms={farms} onSelectFarm={setSelectedFarmId} liveTelemetry={liveTelemetry} />
           </div>
         ) : selectedFarm ? (
           <div className="relative z-10 min-h-full p-10 flex flex-col">
